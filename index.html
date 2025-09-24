@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chrome FPS Tester & Memory Cloner</title>
+  <style>
+    body {
+      font-family: system-ui, Segoe UI, Roboto, Arial;
+      background: #f9f9f9;
+      margin: 20px;
+      color: #111;
+    }
+    h2 { margin-bottom: 10px; }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    input, select { padding: 6px; }
+    button { padding: 6px 12px; cursor: pointer; }
+    .stats {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      display: block;
+      margin-top: 8px;
+    }
+    small { color: #555; }
+  </style>
+</head>
+<body>
+  <h2 id="title">Chrome FPS Tester & Memory Cloner (FULL)</h2>
+
+  <!-- Language selector -->
+  <label id="langLabel">Language:</label>
+  <select id="languageSelect"></select>
+
+  <div class="controls">
+    <label id="sizeLabel">Clone size (KB):</label>
+    <input id="kbInput" type="number" value="1024" min="1" />
+    <label id="countLabel">Count:</label>
+    <input id="countInput" type="number" value="1" min="1" />
+    <button id="createBtn">Create Clone</button>
+    <button id="clearBtn">Clear All</button>
+    <button id="stressBtn">Start Stress Test</button>
+  </div>
+
+  <div class="stats">
+    <div><strong id="clonesText">Clones:</strong> <span id="count">0</span></div>
+    <div><strong id="memText">Total Memory:</strong> <span id="totalMB">0</span> MB</div>
+    <div><strong id="fpsText">FPS:</strong> <span id="fps">0</span></div>
+  </div>
+
+  <canvas id="animCanvas" width="600" height="200"></canvas>
+
+  <div style="margin-top:10px">
+    <small id="note">⚠ At very high values the browser may freeze.<br>
+    Note: Stress test adds a clone every 500ms, press again to stop.</small>
+  </div>
+
+  <script>
+    const clones = [];
+    const kbInput = document.getElementById('kbInput');
+    const countInput = document.getElementById('countInput');
+    const createBtn = document.getElementById('createBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const stressBtn = document.getElementById('stressBtn');
+    const countEl = document.getElementById('count');
+    const totalEl = document.getElementById('totalMB');
+    const fpsEl = document.getElementById('fps');
+    const canvas = document.getElementById('animCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const titleEl = document.getElementById('title');
+    const langLabel = document.getElementById('langLabel');
+    const sizeLabel = document.getElementById('sizeLabel');
+    const countLabel = document.getElementById('countLabel');
+    const clonesText = document.getElementById('clonesText');
+    const memText = document.getElementById('memText');
+    const fpsText = document.getElementById('fpsText');
+    const note = document.getElementById('note');
+    const langSelect = document.getElementById('languageSelect');
+
+    let stressInterval = null;
+
+    // Translations (English default)
+    const translations = {
+      en: {
+        title: "Chrome FPS Tester & Memory Cloner",
+        lang: "Language:",
+        size: "Clone size (KB):",
+        count: "Count:",
+        create: "Create Clone",
+        clear: "Clear All",
+        stressStart: "Start Stress Test",
+        stressStop: "Stop Stress Test",
+        clones: "Clones:",
+        mem: "Total Memory:",
+        fps: "FPS:",
+        note: "⚠ At very high values the browser may freeze.<br>Note: Stress test adds a clone every 500ms, press again to stop."
+      },
+      tr: {
+        title: "Chrome FPS Tester & Memory Klonlayıcı",
+        lang: "Dil:",
+        size: "Klon boyutu (KB):",
+        count: "Adet:",
+        create: "Klon Oluştur",
+        clear: "Tümünü Sil",
+        stressStart: "Stres Testi Başlat",
+        stressStop: "Stres Testi Durdur",
+        clones: "Klonlar:",
+        mem: "Toplam Bellek:",
+        fps: "FPS:",
+        note: "⚠ Çok yüksek değerlerde tarayıcı donabilir.<br>Not: Stres testi butonu her 500ms’de bir klon ekler, tekrar basınca durur."
+      },
+      // diğer diller eklenebilir
+    };
+
+    // Fill dropdown
+    Object.keys(translations).forEach(code => {
+      let opt = document.createElement("option");
+      opt.value = code;
+      opt.textContent = code.toUpperCase();
+      langSelect.appendChild(opt);
+    });
+    langSelect.value = "en"; // default English
+    applyLanguage("en"); // page opens in English
+
+    function applyLanguage(lang) {
+      const t = translations[lang];
+      if (!t) return;
+      titleEl.textContent = t.title;
+      langLabel.textContent = t.lang;
+      sizeLabel.textContent = t.size;
+      countLabel.textContent = t.count;
+      createBtn.textContent = t.create;
+      clearBtn.textContent = t.clear;
+      stressBtn.textContent = stressInterval ? t.stressStop : t.stressStart;
+      clonesText.textContent = t.clones;
+      memText.textContent = t.mem;
+      fpsText.textContent = t.fps;
+      note.innerHTML = t.note;
+    }
+
+    langSelect.addEventListener("change", () => applyLanguage(langSelect.value));
+
+    function createClone() {
+      let kb = parseInt(kbInput.value, 10);
+      let adet = parseInt(countInput.value, 10);
+      if (!Number.isFinite(kb) || kb <= 0 || !Number.isFinite(adet) || adet <= 0) {
+        alert("Enter valid numbers.");
+        return;
+      }
+      const mb = (kb * adet) / 1024;
+      if (mb >= 50) {
+        const ok = confirm("This will use ~" + mb.toFixed(2) + " MB memory. Continue?");
+        if (!ok) return;
+      }
+      try {
+        for (let n = 0; n < adet; n++) {
+          const bytes = kb * 1024;
+          const data = new Uint8Array(bytes);
+          for (let i = 0; i < data.length; i += 4096) data[i] = 1;
+          clones.push(data);
+        }
+        updateStatus();
+      } catch(e) { alert("Failed to create clone: " + e.message); }
+    }
+
+    function clearAll() {
+      clones.length = 0;
+      updateStatus();
+    }
+
+    function updateStatus() {
+      countEl.textContent = clones.length;
+      const totalBytes = clones.reduce((s,a)=>s+(a?.length||0),0);
+      totalEl.textContent = (totalBytes / 1024 / 1024).toFixed(2);
+    }
+
+    let frames = 0;
+    let lastUpdate = performance.now();
+    function fpsLoop(now) {
+      frames++;
+      const delta = now - lastUpdate;
+      if (delta >= 500) {
+        fpsEl.textContent = Math.round((frames / delta) * 1000);
+        frames = 0;
+        lastUpdate = now;
+      }
+      requestAnimationFrame(fpsLoop);
+    }
+    requestAnimationFrame(fpsLoop);
+
+    let x = 0;
+    function animate() {
+      ctx.fillStyle = "white";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = "blue";
+      ctx.fillRect(x,50,50,50);
+      x += 5;
+      if (x>canvas.width) x=-50;
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    function toggleStress() {
+      if(stressInterval){
+        clearInterval(stressInterval);
+        stressInterval = null;
+      } else {
+        stressInterval = setInterval(createClone, 500);
+      }
+      applyLanguage(langSelect.value);
+    }
+
+    createBtn.addEventListener("click", createClone);
+    clearBtn.addEventListener("click", clearAll);
+    stressBtn.addEventListener("click", toggleStress);
+  </script>
+</body>
+</html>
